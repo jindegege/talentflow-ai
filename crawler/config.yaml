@@ -1,0 +1,17 @@
+# crawler/config.yaml
+
+job:
+  name: "local_data_importer"
+  # 本地数据源路径
+  source:
+    jobs_file: "./crawler/data/jobs_sample.json"
+    resumes_file: "./crawler/data/resumes_sample.json"
+  
+  # 批次处理大小
+  batch_size: 50
+
+  # 映射规则（模拟从 HTML 提取字段的逻辑）
+  mapping:
+    job_title: "title"
+    job_desc: "description"
+    job_req: "requirements"
