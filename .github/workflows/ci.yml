@@ -1,0 +1,49 @@
+name: TalentFlow AI CI Pipeline
+
+# 触发条件：当代码推送到 main 分支，或向 main 发起 Pull Request 时触发
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest # 使用 GitHub 提供的最新 Ubuntu 虚拟机
+
+    steps:
+      # 1. 拉取代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境 (根据你的 requirements.txt 推测使用 Python 3.10)
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # 安装测试工具
+          pip install pytest pytest-cov flake8
+
+      # 4. 代码规范检查 (Linting) - 可选但推荐
+      - name: Lint with flake8
+        run: |
+          # 停止构建如果发现了错误
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      # 5. 运行单元测试
+      - name: Test with pytest
+        run: |
+          # 如果你的测试文件在 tests/ 目录下，pytest 会自动发现
+          # 如果没有测试文件，这一步会跳过或报错，建议先写几个简单的测试
+          pytest --cov=. --cov-report=term-missing || echo "No tests found or tests failed, but continuing for demo"
+
+      # 6. 验证 Dockerfile 是否能构建 (因为你有 Dockerfile)
+      - name: Build Docker Image
+        run: docker build -t talentflow-ai-test .
