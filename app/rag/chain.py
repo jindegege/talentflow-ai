@@ -3,17 +3,20 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-import numpy as np # 引入 numpy
-import faiss      # 引入 faiss
+from langchain_openai import ChatOpenAI
+
+from app.core.config import settings
 
 from app.utils.logger import logger
-from app.core.vector_store import get_vectorstore
-from app.core.llm import get_llm
 
-def get_rag_chain(): 
+
+def get_rag_chain(vectorstore): 
     llm = get_llm()
 
-    # 1. 定义提示词模板
+    # 1. 定义提示词模板 (修改点：替换为增强版模板)
+    # ==================================================================================
+    # 替换这里的 template 字符串
+    # ==================================================================================
     template = """
 你是一个智能助手。请根据以下参考信息回答用户的问题。
 
@@ -31,11 +34,13 @@ def get_rag_chain():
 
 ### 助手回答：
 """
+    # ==================================================================================
+    # 保持下面的 Prompt 初始化不变
+    # ==================================================================================
     prompt = ChatPromptTemplate.from_template(template)
 
-    # 2. 定义检索函数 (核心修复逻辑在这里)
+    # 2. 定义检索函数 (闭包) - 保持你现有的硬编码逻辑不变
     def retrieve_context(inputs):
-        # 解析输入
         question = ""
         if isinstance(inputs, dict):
             question = inputs.get("input", "")
@@ -44,66 +49,42 @@ def get_rag_chain():
         else:
             question = str(inputs)
 
-        if not question.strip():
-            return "用户未输入有效问题。"
-
         logger.info(f"正在检索问题: {question[:50]}...")
-        
         try:
-            # --- 获取向量库实例 ---
-            vectorstore = get_vectorstore()
-            index = vectorstore["index"]
-            metadatas = vectorstore["metadatas"]
+            # ==========================================
+            # 核心修复：直接使用传入的 vectorstore 进行检索
+            # ==========================================
+
+            # 1. 获取集合对象
+            collection = vectorstore["collection"]
+
+            # 2. 将问题向量化
             embedding_func = vectorstore["embedding_function"]
+            logger.info(f"[RAG] 正在计算向量...")
+            query_vector = embedding_func.embed_documents([question])
 
-            # --- 修复点 1：检查索引是否为空 ---
-            if index.ntotal == 0:
-                logger.warning("FAISS 索引为空，跳过检索")
-                return ""
+            # 3. 原生 ChromaDB 查询方式
+            logger.info("[RAG] 正在查询 ChromaDB...")
+            query_results = collection.query(
+                query_embeddings=query_vector,
+                n_results=3
+            )
 
-            # --- 获取查询向量 ---
-            query_vector = embedding_func.embed_query(question)
-            query_vector = np.array([query_vector]).astype('float32')
-            
-            # --- 修复点 2：确保查询向量已归一化 ---
-            # 如果向量模长为0，normalize_L2 会处理它，或者我们可以手动检查
-            norm = np.linalg.norm(query_vector)
-            if norm < 1e-9:
-                logger.error("查询向量为零向量，跳过检索")
-                return ""
-                
-            faiss.normalize_L2(query_vector)
+            # 4. 提取文档内容
+            docs_content = query_results['documents'][0]
 
-            # --- 执行检索 ---
-            k = 3 # 取前3个
-            # 如果库里的数据少于 k，search 会返回实际数量
-            if index.ntotal < k:
-                k = index.ntotal
-
-            distances, indices = index.search(query_vector, k)
-            
-            # --- 提取结果 ---
-            contexts = []
-            # indices 是一个二维数组 [[0, 1, 2]]，我们需要遍历它
-            for idx in indices[0]:
-                if idx != -1 and 0 <= idx < len(metadatas):
-                    # 这里假设 metadatas 是列表，且索引对应
-                    # 你可以根据需要提取 title, company 等字段拼接到 context 中
-                    meta = metadatas[idx]
-                    content = f"职位: {meta.get('title')}, 公司: {meta.get('company')}, 要求: {meta.get('skills')}"
-                    contexts.append(content)
-            
-            return "\n\n".join(contexts)
+            # 5. 拼接
+            context = "\n\n".join(docs_content)
+            return context
 
         except Exception as e:
-            logger.error(f"检索过程中发生错误: {e}")
-            # 发生错误时返回空字符串，让 LLM 自由发挥或提示无信息
+            logger.error(f"检索出错了！错误信息: {e}")
             return ""
 
-    # 3. 构建链
+    # 3. 构建链 (保持不变)
     rag_chain = (
         {
-            "context": retrieve_context, 
+            "context": retrieve_context, # 使用上面自定义的检索函数
             "question": RunnablePassthrough()
         }
         | prompt
@@ -112,3 +93,18 @@ def get_rag_chain():
     )
 
     return rag_chain
+
+
+def get_llm():
+    """
+    初始化 LLM 模型
+    """
+    llm = ChatOpenAI(
+        api_key=settings.API_KEY,
+        base_url="https://api.deepseek.com",
+        model="deepseek-chat",
+        temperature=0.7
+    )
+
+    logger.info(f"LLM 初始化成功！模型: {llm.model_name}")
+    return llm

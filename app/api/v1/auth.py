@@ -1,83 +1,74 @@
+# 文件路径：app/api/v1/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from typing import List
 from sqlalchemy.orm import Session
 from datetime import timedelta
-from typing import List
 
 # 导入本地模块
-from app.schemas import user_schema
+from app import schemas, crud
 from app.core import security
-from app.models import base,database
+from app.models import base, database
+from . import deps  # 导入刚才创建的依赖模块
 
-from app.crud import crud
-
-router = APIRouter(prefix="/api/v1/auth", tags=["认证授权"])
+router = APIRouter()
 
 # ==========================================
-# 注册接口
+# 注册与租户接口
 # ==========================================
 
-@router.post("/register", response_model=user_schema.UserOut, status_code=status.HTTP_201_CREATED)
+@router.get("/tenants", response_model=List[schemas.TenantOut])
+def read_tenants(db: Session = Depends(database.get_db)):
+    """获取所有租户，供注册页面选择"""
+    tenants = db.query(base.TenantDB).all()
+    return tenants
+
+@router.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
 def register(
-    user_in: user_schema.UserCreate, 
+    user_in: schemas.UserCreate, 
     db: Session = Depends(database.get_db)
 ):
-    """
-    用户注册
-    1. 检查用户名唯一性
-    2. 验证租户是否存在
-    3. 创建用户并关联租户
-    """
+    """用户注册接口"""
     # 1. 检查用户名是否已存在
     if crud.get_user_by_username(db, username=user_in.username):
-        raise HTTPException(status_code=400, detail="用户名已被注册")
+        raise HTTPException(status_code=400, detail="用户名已存在")
+
+    # 2. 校验租户ID
+    if not user_in.tenant_id:
+         raise HTTPException(status_code=400, detail="必须选择所属租户")
 
     # 3. 创建用户
-    # crud.create_user 内部会处理密码哈希
-    return crud.create_user(db, user_in=user_in)
+    return crud.create_user(db, user_in=user_in, tenant_id=user_in.tenant_id)
 
 # ==========================================
 # 登录接口
 # ==========================================
 
-@router.post("/login", response_model=user_schema.LoginResponse)
-async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+@router.post("/login", response_model=schemas.LoginResponse)
+async def login(
+    form_data: deps.OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(database.get_db)
 ):
     """
     OAuth2 兼容登录接口
-    返回: access_token, token_type, 以及用户完整信息
     """
-    # 1. 查找用户 (支持用户名或邮箱登录)
+    # 1. 验证用户
     user = crud.get_user_by_username(db, username=form_data.username)
-    if not user:
-        # 为了安全，不提示具体是用户名错还是密码错
+    if not user or not security.verify_password(form_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 2. 验证密码
-    if not security.verify_password(form_data.password, user.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
-    # 4. 生成 Access Token
+    # 2. 生成 Token
     access_token = security.create_access_token(
-        subject=user.id,
-        expires_delta=timedelta(minutes=30) # 设置过期时间为 30 分钟
+        subject=str(user.id), # 确保转为字符串
+        expires_delta=timedelta(minutes=security.settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
-    # 5. 返回结果
-    # 将 SQLAlchemy 模型转换为 Pydantic 模型，并附加 token 信息
-    return user_schema.LoginResponse(
+    # 3. 返回结果
+    return schemas.LoginResponse(
         access_token=access_token,
         token_type="bearer",
-        user=user.model_dump() # 包含 id, username等
+        user=user.model_dump()
     )

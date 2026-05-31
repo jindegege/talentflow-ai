@@ -1,199 +1,117 @@
-# app\models\base.py
-from sqlalchemy import Column, Integer, String, Text, DateTime,SmallInteger, ForeignKey, Boolean, func
-from sqlalchemy.orm import relationship, declarative_base
+# 从 SQLAlchemy 库中导入常用的字段类型定义
+# Column: 定义表列
+# Integer, String, Text: 数据类型
+# DateTime: 时间类型
+# ForeignKey: 定义外键约束，用于关联表
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 
-# 从当前包导入 Base 类（如果你的项目混用了 SQLAlchemy 原生写法）
+# 导入 datetime 模块，用于获取当前时间
+from datetime import datetime
+
+# 从当前包中导入 Base 对象
+# Base 是 SQLAlchemy 的基类，所有模型类都需要继承它
 from . import Base
 
+from sqlalchemy.orm import relationship
+
+import uuid
 
 # ==========================================
-# 2. 用户表模型
+# 2. 数据库模型 (ORM)
 # ==========================================
+
+# 定义租户模型类，对应数据库中的 tenants 表
+# 租户是 SaaS 系统的核心概念，用于实现数据隔离
+class TenantDB(Base):
+    # 指定数据库表名为 "tenants"
+    __tablename__ = "tenants"
+    
+    # 定义主键 ID 列
+    # primary_key=True 表示这是主键
+    # index=True 表示为该字段创建索引，加快查询速度
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 定义租户名称列
+    # String(100) 表示最大长度为 100 的字符串
+    # nullable=False 表示该字段不能为空
+    name = Column(String(100), nullable=False)
+    
+    # 定义创建时间列
+    # default=datetime.now 表示插入数据时，默认为当前时间
+    created_at = Column(DateTime, default=datetime.now)
+
+# 定义用户模型类，对应数据库中的 users 表
 class UserDB(Base):
+    # 指定数据库表名为 "users"
     __tablename__ = "users"
-
+    
+    # 定义主键 ID 列
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(50), unique=True, nullable=False, index=True)
-    email = Column(String(100), unique=True, nullable=False, index=True)
-    password = Column(String(255), nullable=False)
-    role = Column(String(20), default="candidate")  # candidate, admin, hr
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    full_name = Column(String(50), unique=True, nullable=True)
+    
+    # 定义租户 ID 列（外键）
+    # ForeignKey("tenants.id") 表示该字段关联到 tenants 表的 id 字段
+    # 这建立了用户与租户的多对一关系（一个租户有多个用户）
+    tenant_id = Column(Integer, ForeignKey("tenants.id"))
+    
+    # 定义用户名字段
+    # unique=True 表示用户名必须唯一，不能重复
+    # index=True 表示创建索引，加快登录时的查询速度
+    # nullable=False 表示用户名不能为空
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    
+    # 定义密码字段
+    # 存储的是经过哈希加密后的字符串，不是明文密码
+    # String(100) 足够存储 bcrypt 加密后的字符串
+    password = Column(String(100), nullable=False)
+    
+    # 定义昵称字段
+    # 用于前端显示，可以为空
+    nickname = Column(String(50))
+    
+    # 定义角色字段
+    # Integer 类型，例如 0 代表普通用户，1 代表管理员
+    role = Column(Integer)
+    
+    # 定义用户创建时间
+    # 默认值为当前时间
+    created_at = Column(DateTime, default=datetime.now)
+    
+    
+class KnowledgeFile(Base):
+    __tablename__ = "knowledge_files"
 
-    # 关联关系
-    resumes = relationship("ResumeDB", back_populates="user", cascade="all, delete-orphan")
-    applications = relationship("ApplicationDB", back_populates="user")
-    sessions = relationship("ChatSessionDB", back_populates="user", cascade="all, delete-orphan")
-    deliveries = relationship("TaskDeliveryDB", back_populates="user")
-
-
-# ==========================================
-# 3. 技能字典表模型
-# ==========================================
-class SkillDB(Base):
-    __tablename__ = "skills"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(50), unique=True, nullable=False)
-    category = Column(String(30), nullable=False, index=True)
-    parent_id = Column(Integer, ForeignKey("skills.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-# ==========================================
-# 4. 简历表模型
-# ==========================================
-class ResumeDB(Base):
-    __tablename__ = "resumes"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    title = Column(String(100), nullable=False)
-    summary = Column(Text, nullable=True)
-    project_experience = Column(Text, nullable=True)
-    education = Column(Text, nullable=True)
-    is_default = Column(Boolean, default=False)
-    vector_id = Column(String(64), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # 关联关系
-    user = relationship("UserDB", back_populates="resumes")
-    applications = relationship("ApplicationDB", back_populates="resume")
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    filename = Column(String, index=True)
+    file_path = Column(String)  # 本地存储路径
+    tenant_id = Column(String, index=True)  # 属于哪个公司/租户
+    uploader_id = Column(String)  # 谁上传的（管理员ID）
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# ==========================================
-# 5. 职位表模型
-# ==========================================
-class JobDB(Base):
-    __tablename__ = "jobs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(100), nullable=False)
-    company = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-    location = Column(String(50), nullable=True)
-    salary_range = Column(String(50), nullable=True)
-    source_url = Column(String(255), nullable=True)
-    vector_id = Column(String(64), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # 关联关系
-    applications = relationship("ApplicationDB", back_populates="job")
-
-
-# ==========================================
-# 6. 投递记录表模型
-# ==========================================
-class ApplicationDB(Base):
-    __tablename__ = "applications"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
-    resume_id = Column(Integer, ForeignKey("resumes.id"), nullable=False)
-    status = Column(String(20), default="applied")
-    cover_letter = Column(Text, nullable=True)
-    applied_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # 关联关系
-    user = relationship("UserDB", back_populates="applications")
-    job = relationship("JobDB", back_populates="applications")
-    resume = relationship("ResumeDB", back_populates="applications")
-
-
-# ==========================================
-# 7. 实战任务表模型 (项目管理核心)
-# ==========================================
-class TaskDB(Base):
-    __tablename__ = "tasks"
-
-    id = Column(Integer, primary_key=True, index=True)
-
-    # 基础信息
-    title = Column(String(150), nullable=False, comment="任务标题")
-    description = Column(Text, nullable=True, comment="任务简短描述/摘要")
-
-    # 详细内容 (通常存储HTML或Markdown)
-    content = Column(Text, nullable=True, comment="任务详细描述，包含需求、步骤等")
-
-    # 属性
-    required_skills = Column(String(255), nullable=True, comment="推荐技能标签，逗号分隔")
-    difficulty = Column(String(20), default="Intermediate", comment="难度等级: Beginner, Intermediate, Advanced")
-
-    # 状态控制
-    is_active = Column(Boolean, default=True, comment="是否上架/激活")
-    status = Column(String(20), default="active", comment="逻辑状态: active, archived, draft")
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # 关联关系
-    deliveries = relationship("TaskDeliveryDB", back_populates="task", cascade="all, delete-orphan")
-
-
-# ==========================================
-# 8. 任务交付表模型
-# ==========================================
-class TaskDeliveryDB(Base):
-    __tablename__ = "task_deliveries"
-
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    delivery_url = Column(String(255), nullable=True, comment="交付物链接，如GitHub地址")
-    comment = Column(Text, nullable=True, comment="用户备注")
-    status = Column(String(20), default="submitted", comment="submitted, reviewed, rejected")
-    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # 关联关系
-    task = relationship("TaskDB", back_populates="deliveries")
-    user = relationship("UserDB", back_populates="deliveries")
-
-
-# ==========================================
-# 9. AI 聊天会话表模型
-# ==========================================
 class ChatSessionDB(Base):
     __tablename__ = "chat_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    title = Column(String(100), default="新对话")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    user_id = Column(Integer, index=True)
+    tenant_id = Column(Integer, index=True)
+    title = Column(String(255), comment="会话标题")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-    # 关联关系
-    user = relationship("UserDB", back_populates="sessions")
+    # 修改 1：引用正确的类名 "ChatMessageDB"
     messages = relationship("ChatMessageDB", back_populates="session", cascade="all, delete-orphan")
 
 
-# ==========================================
-# 10. AI 聊天消息表模型
-# ==========================================
 class ChatMessageDB(Base):
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
-    role = Column(String(20), nullable=False)  # user / assistant
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # 关联关系
-    session = relationship("ChatSessionDB", back_populates="messages")
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"))
     
+    tenant_id = Column(Integer, index=True)
+    
+    role = Column(String(50))
+    content = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-class ProjectDB(Base):
-    """项目表 ORM 模型"""
-    __tablename__ = "projects"
-
-    id = Column(Integer, primary_key=True, index=True, comment="项目ID")
-    title = Column(String(255), nullable=False, comment="项目标题")
-    category = Column(String(50), nullable=False, comment="项目分类")
-    reward = Column(String(50), nullable=False, comment="悬赏积分")
-    level = Column(String(50), nullable=False, comment="等级")
-    description = Column(Text, comment="项目详细描述")
-    status = Column(SmallInteger, default=1, comment="项目状态：0-已关闭，1-招募中，2-进行中，3-已完成")
-    created_at = Column(DateTime, default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), comment="更新时间")
+    # 修改 2：这里也要引用正确的类名 "ChatSessionDB" (你原来写的是 "ChatSession")
+    session = relationship("ChatSessionDB", back_populates="messages")

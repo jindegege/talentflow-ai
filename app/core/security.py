@@ -13,12 +13,10 @@ from passlib.context import CryptContext
 # 从项目的配置模块中导入 settings 对象，用于获取密钥等配置信息
 from app.core.config import settings
 
-# --- 修改点开始 ---
 # 创建一个密码加密上下文对象
-# schemes=["argon2"] 指定使用 argon2 算法（目前最安全的哈希算法之一，且无密码长度限制）
+# schemes=["bcrypt"] 指定使用 bcrypt 算法进行加密（安全性高）
 # deprecated="auto" 自动处理旧版本加密格式的兼容
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-# --- 修改点结束 ---
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # 定义生成 Access Token 的函数
 # subject: 令牌的主题，通常是用户的 ID 或用户名
@@ -51,13 +49,13 @@ def create_access_token(
 # plain_password: 用户登录时输入的明文密码
 # hashed_password: 数据库中存储的哈希密码
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    # 使用 argon2 算法比对明文密码和哈希密码
+    # 使用 bcrypt 算法比对明文密码和哈希密码
     # 如果匹配返回 True，否则返回 False
     return pwd_context.verify(plain_password, hashed_password)
 
 # 定义生成密码哈希的函数
 # password: 用户注册时输入的明文密码
 def get_password_hash(password: str) -> str:
-    # 使用 argon2 算法将明文密码转换为哈希字符串
+    # 使用 bcrypt 算法将明文密码转换为哈希字符串
     # 数据库中只存储这个哈希值，不存储明文
     return pwd_context.hash(password)

@@ -10,6 +10,8 @@ from sqlmodel import SQLModel, create_engine, Session
 # 从 SQLAlchemy 导入 sessionmaker，用于配置会话工厂
 from sqlalchemy.orm import sessionmaker
 
+# 从当前包导入 Base 类（如果你的项目混用了 SQLAlchemy 原生写法）
+from . import Base
 
 # 导入 os 模块，用于读取环境变量
 import os
@@ -28,7 +30,7 @@ load_dotenv()
 # 格式通常为： dialect+driver://username:password@host:port/database
 # 如果环境变量未设置，则使用默认的 SQLite 或 MySQL 连接字符串作为兜底
 # 注意：原代码中混用了 MySQL 和 SQLite 的配置逻辑，建议根据实际使用的数据库二选一
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+pymysql://root:123456@localhost:3306/dandelion_tribe?charset=utf8mb4")
+DATABASE_URL = os.getenv("DATABASE_URL", "mysql+pymysql://root:123456@localhost:3306/saas_rag_business?charset=utf8mb4")
 
 # 创建数据库引擎
 # echo=False 表示不在控制台打印生成的 SQL 语句（开发调试时可设为 True）

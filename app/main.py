@@ -1,39 +1,25 @@
+# 从 fastapi 库中导入 FastAPI 类，用于创建应用实例
 from fastapi import FastAPI
-from contextlib import asynccontextmanager
-# 导入路由
-from app.api.v1 import auth
-from app.api.v1.admin import project,jobs_manager,user_manager,resume_manager,stats_router
-from app.api.v1.user import tasks,job_recommendation,smart_deliver,resumes,applications
-from app.api.v1.mentor import candidate_deliver,mentor,task
 
 # 导入 CORS 中间件，用于处理浏览器的跨域资源共享请求
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.model_loader import load_all_models
+# 从 app.api.v1 包中导入 auth 模块（即路由文件）
+from app.api.v1 import auth,upload,chat
 
-import os
+import sys
+import asyncio
 
-# 确保环境变量已加载
-os.environ["LANGCHAIN_TRACING_V2"] = "true"
+from app.core.middleware import global_exception_handler
 
-# 1. 定义 lifespan (这是新版唯一正确的写法)
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("系统正在启动...")
-        # 在这里调用模型加载！
-    try:
-        load_all_models()
-    except Exception as e:
-        print(f"模型加载发生严重错误: {e}")
-    print("系统启动完成，准备接收请求！")
-    print("正在连接数据库...")
-    # 初始化逻辑...
-    yield
-    print("正在关闭连接...")
-    # 清理逻辑...
+# --- 【核心修复】强制 Windows 使用旧版网络策略 ---
+if sys.platform == "win32":
+    print('win32----')
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# 2. 创建 app 实例，传入 lifespan
-app = FastAPI(title="AI蒲公英部落", lifespan=lifespan)
+# 创建一个 FastAPI 应用实例
+# title 参数定义了 API 文档（Swagger UI）的标题
+app = FastAPI(title="SaaS RAG 业务系统")
 
 # ==========================================
 # 配置跨域资源共享 (CORS) 中间件
@@ -46,23 +32,21 @@ app.add_middleware(
     allow_headers=["*"],          # 允许所有 HTTP 请求头
 )
 
-# 3. 注册路由 (注意：这里不要传任何额外参数)
-app.include_router(auth.router)  
-app.include_router(tasks.router)     
-app.include_router(project.router) 
-app.include_router(jobs_manager.router) 
-app.include_router(user_manager.router) 
-app.include_router(resume_manager.router) 
-app.include_router(tasks.router) 
-app.include_router(job_recommendation.router) 
-app.include_router(smart_deliver.router) 
-app.include_router(resumes.router) 
-app.include_router(stats_router.router) 
-app.include_router(candidate_deliver.router) 
-app.include_router(mentor.router) 
-app.include_router(task.router) 
-app.include_router(applications.router) 
-
+# ==========================================
+# 注册路由
+# ==========================================
+# 将 auth 模块中的路由注册到主应用中
+# prefix="/api/v1/auth" 为所有路由添加了统一的前缀
+# 例如：auth.py 中的 @router.post("/login") 将自动变为 /api/v1/auth/login
+# tags=["认证"] 用于在 API 文档中对接口进行分组显示
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["认证"])
+app.include_router(upload.router,prefix="/api/v1", tags=["上传"])
+app.include_router(chat.router,prefix="/api/v1", tags=["会话"])
+app.add_exception_handler(Exception, global_exception_handler)
+# ==========================================
+# 根路径健康检查
+# ==========================================
 @app.get("/")
-async def root():
-    return {"message": "Hello World"}
+def root():
+    # 当用户访问网站根目录时，返回欢迎信息
+    return {"message": "Welcome to SaaS RAG API"}

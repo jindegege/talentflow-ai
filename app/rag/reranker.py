@@ -1,56 +1,82 @@
-from typing import List, Tuple
+import os
+from typing import List
 from langchain_core.documents import Document
-from cachetools import LRUCache
 
-class RerankerService:
-    def __init__(self, max_cache_size: int = 1000):
-        # 1. 这里不再加载模型，直接初始化缓存
-        self.cache = LRUCache(maxsize=max_cache_size)
-        print("重排序服务（Reranker Service）初始化完成")
+import transformers
 
-    def rank(self, query: str, documents: List[Document], top_k: int = 3, max_rerank_limit: int = 20):
+# --- 修复补丁开始 ---
+# 检查当前版本是否缺失该函数，如果缺失则手动补上
+if not hasattr(transformers.utils, "is_torch_fx_available"):
+    print("正在自动修复 transformers 兼容性缺失...")
+
+    # 1. 定义一个假的检查函数（默认返回 False，即不使用 Torch FX）
+    def _mock_is_torch_fx_available():
+        return False
+
+    # 2. 将这个函数动态注入到 transformers.utils 中
+    transformers.utils.is_torch_fx_available = _mock_is_torch_fx_available
+
+    # 3. 同时修补 import_utils（防止 FlagEmbedding 从旧路径引用报错）
+    if not hasattr(transformers.utils, "import_utils"):
+        import types
+        transformers.utils.import_utils = types.ModuleType("import_utils")
+    transformers.utils.import_utils.is_torch_fx_available = _mock_is_torch_fx_available
+
+    print("修复完成，继续运行...")
+# --- 修复补丁结束 ---
+
+
+from FlagEmbedding import FlagReranker
+
+# 1. 配置本地模型路径
+MODEL_PATH = r"E:\llm\BAAI\bge-reranker-v2-m3"
+
+class Reranker:
+    def __init__(self):
+        if not os.path.exists(MODEL_PATH):
+            raise FileNotFoundError(f"模型文件未找到: {MODEL_PATH}")
+        
+        print(f"正在加载重排序模型 (CPU模式): {MODEL_PATH}")
+        
+        # 2. 初始化模型 (CPU 关键配置)
+        # device='cpu': 强制使用 CPU，不检测显卡
+        # use_fp16=False: CPU 不支持半精度加速，必须设为 False，否则可能报错或更慢
+        self.reranker = FlagReranker(MODEL_PATH, device='cpu', use_fp16=False)
+        
+        print("重排序模型加载完毕 (运行在 CPU 上)！")
+
+    def rank(self, query: str, documents: List[Document], top_k: int = 3):
         """
         对文档列表进行重排序
         """
-        # 2. 从全局 model_loader 导入已经加载好的模型实例
-        from app.core.model_loader import get_reranker_model    
-        model = get_reranker_model()
-        if not model:
-            # 如果模型没加载成功，直接返回截断的原文档，防止报错
-            print("严重警告：重排序模型未加载！请检查 model_loader.py 的加载日志。")
-            return documents[:top_k]
-
         if not documents:
             return []
 
-        # 3. 限制最大重排数量，防止 CPU/GPU 爆炸
-        docs_to_rerank = documents[:max_rerank_limit]
+        # 3. 准备数据对
+        pairs = [[query, doc.page_content] for doc in documents]
+        
+        # 4. 计算分数
+        # CPU 模式下计算速度取决于你的 CPU 核心数
+        # 强制返回 float 列表，防止新版返回 numpy 或 tensor 导致排序报错
+        scores = self.reranker.compute_score(pairs, normalize=True) 
 
-        # 4. 缓存机制
-        cache_key = (query, tuple(doc.page_content for doc in docs_to_rerank))
-        if cache_key in self.cache:
-            return self.cache[cache_key]
-
-        # 5. 准备数据对并计算分数
-        pairs = [[query, doc.page_content] for doc in docs_to_rerank]
-        # 调用全局单例模型进行推理
-        scores = model.compute_score(pairs, normalize=True) 
-
-        # 确保分数是列表格式
+        # 如果是批量处理，确保它是列表
         if isinstance(scores, float): 
             scores = [scores]
         
-        # 6. 绑定并排序
-        doc_score_pairs: List[Tuple[Document, float]] = list(zip(docs_to_rerank, scores))
+        # 5. 绑定并排序
+        doc_score_pairs = list(zip(documents, scores))
         doc_score_pairs.sort(key=lambda x: x[1], reverse=True)
         
-        # 7. 截取 Top K
+        # 6. 截取 Top K
         top_docs = [doc for doc, score in doc_score_pairs[:top_k]]
         
-        # 存入缓存
-        self.cache[cache_key] = top_docs
-        
+        # 调试日志
+        print(f"重排序完成：从 {len(documents)} 篇文档中筛选出 {top_k} 篇。")
+        for i, (doc, score) in enumerate(doc_score_pairs[:top_k]):
+            print(f"   Top {i+1}: 分数={score:.4f}, 内容={doc.page_content[:30]}...")
+            
         return top_docs
 
-# 全局单例（只包含业务逻辑和缓存，不包含模型权重）
-global_reranker = RerankerService()
+# 全局单例
+global_reranker = Reranker()
